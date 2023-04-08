@@ -67,7 +67,7 @@ class mbdb():
         vals = []
         
         # getmembers() returns all the  members of an object  
-        for it in inspect.getmembers(pcls):        
+        for it in inspect.getmembers(pcls):       
             # to remove private and protected functions 
             if not it[0].startswith('_'):           
                 # To remove other methods that doesnot start with a underscore 

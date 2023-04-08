@@ -1,6 +1,6 @@
 #the following external command are being used: 
-# sudo apt install espeak xdotool xclip xsel
-# pip install pyperclip 
+# sudo apt install espeak xdotool xclip xsel ffmpeg wmctrl zenity mpv
+# pip install pyperclip google_speech pyautogui
 
 import subprocess
 import sys
@@ -78,7 +78,7 @@ class mbwin():
 
     def copy_to_clipboard(ptext):
         #works...
-        cmd="echo '" + ptext + "' | xclip -selection clipboard"
+        cmd=f"""echo -n '''{ptext.strip()}''' | xclip -selection clipboard"""
         ps = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         # output = ps.communicate()[0]
         # print(output)
@@ -88,15 +88,29 @@ class mbwin():
         #spam = pyperclip.paste()
 
     
-    def clipboard_get():
+    def clipboard_get(from_primary_clipboard = False):
         cmd="xclip -o -selection clipboard"
+        if (from_primary_clipboard):
+            cmd="xclip -o -selection primary"
+
         ps = subprocess.Popen(cmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
         output = ps.communicate()[0]
         #print(output)
         return output.decode("utf-8")
 
-    
-        
+    def snap_window(right_pane=True):
+        import pyautogui
+        #print(pyautogui.size())
+        width= pyautogui.size().width
+        #wmctrl -e <G>,<X>,<Y>,<W>,<H>
+        if right_pane:
+            prm_e = f"0,{width//2},0,{width//2},0"
+        else:
+            prm_e = f"0,0,0,{width//2},0"
+
+        cmd = f'''wmctrl -r :ACTIVE: -b remove,maximized_vert,maximized_horz; wmctrl -r :ACTIVE:  -e {prm_e}; wmctrl -r :ACTIVE: -b add,maximized_vert;'''
+        mbwin.run_cmd(cmd)
+
 
     def run_bash_cmd(pcmd):
         #cmd = "ps -A | grep 'process_name'"
@@ -186,7 +200,8 @@ class mbtools():
     def mpv_play(ppath, pstart=-1, pend = -1, *pstart_args):        
         #"--force-window=no", "-no-video", -vo=null #don't show window and play audio only
         #mpv --really-quiet=yes --volume=99 --no-config --no-load-scripts "$1";
-        prms = [ "mpv", "--really-quiet=yes", "--volume=99", "--no-config", "--no-load-scripts" ]
+        #prms = [ "mpv", "--really-quiet=yes", "--no-config", "--no-load-scripts" ] #ok
+        prms = [ "mpv", "--really-quiet=yes", "--load-scripts=no", "--config=no" ]
 
         if (pstart > 0):
             prms.append("--start=" + str(pstart))
@@ -199,6 +214,7 @@ class mbtools():
         prms.append(f''' "{ppath}" ''')
         cmd = ' '.join(prms)
         #cmd += " &"
+        #print(cmd)
         mbwin.run_bash_cmd(cmd)
 
 
@@ -253,24 +269,27 @@ class mbtools():
         #mbwin.run_cmd(cmd) #works
 
         
-    def ffmpeg_flac(pinput, poutput, pstart=0, pdur=0, pnormalize=True, pmono=True ):
+    def ffmpeg_flac(pinput, poutput, pstart=0, pdur=0, pnormalize=True, pmono=True, psr=48000, *args ):
         prms = ["ffmpeg", "-y", "-vn"]
         if pstart>0:
             prms.append("-ss " + str(pstart))
 
         prms.append(f'''-i "{pinput}" ''')
-        prms.append(" -vn -ar 44100 -sample_fmt s16 ")
+        prms.append(f" -vn -ar {psr} -sample_fmt s16 ")
 
+        nch = 2
         if(pmono):
-            prms.append(" -ac 1 ")
-        else:
-            prms.append(" -ac 2 ")
+            nch = 1
+        prms.append(f" -ac {nch} ")
 
         if (pnormalize):
             prms.append(" -af 'loudnorm=i=-16:tp=-1' ")
         
         if pdur>0:
             prms.append(" -t " + str(pdur))
+
+        for arg in args:
+            prms.append(f''' {arg} ''') #extra params
 
         prms.append(f''' "{poutput}" ''')
 
@@ -284,16 +303,49 @@ class mbtools():
         #mbwin.run_cmd(cmd) #works
        
 
+    def ffmpeg_convert_au(pinput, poutput, pstart=0, pduration=0, pnormalize=False, pmono=False, pbitrate="128k", psr=48000, *args ):
+        prms = ["ffmpeg", "-y", "-vn"]
+        if pstart>0:
+            prms.append("-ss " + str(pstart))
 
-    def ffmpeg_merge_media_files(poutput, pinfiles=[], preencode=True):
-        '''    merges multiple audio/video files.    '''
+        prms.append(f'''-i "{pinput}" ''')
+        prms.append(f" -vn -ar {psr} -ab {pbitrate} ")
+       # prms.append(f" -vn -ar {psr} -sample_fmt s16 ")
+
+        nch = 2
+        if(pmono):
+            nch = 1
+        prms.append(f" -ac {nch} ")
+
+        if (pnormalize):
+            prms.append(" -af 'loudnorm=i=-16:tp=-1' ")
+        
+        if pduration > 0:
+            prms.append(" -t " + str(pduration))
+
+        for arg in args:
+            prms.append(f''' {arg} ''') #extra params
+
+        prms.append(f''' "{poutput}" ''')
+
+        cmd = ' '.join(prms)
+        mbwin.run_bash_cmd(cmd)
+
+
+    def ffmpeg_merge_media_files(poutput, pinfiles=[], preencode=True, pmono=True, psr=48000):
+        '''    merges multiple audio/video files.
+            if [preencode] is True, the audio format will be FLAC.
+            [pmono] and [psr] parameters will be considered if [preencode] is True.
+        '''
+
         path_cuts = "/tmp/cuts.txt"
         with open(path_cuts, 'w') as f:
             #f.writelines(pinfiles)
             for it in pinfiles:
                 f.write(f'''file '{it}'\n''')
 
-        prms = [f'''ffmpeg -safe 0 -f concat -i "{path_cuts}" ''']
+        prms = [f'''ffmpeg -y -protocol_whitelist concat,file,http,https,tcp,tls,crypto -safe 0 -f concat -i "{path_cuts}" ''']
+        #prms = [f'''ffmpeg -safe 0 -f concat -i "{path_cuts}" ''']
         #prms = ['''ffmpeg -safe 0 -f concat -i <(printf "file '%s'\n" ''']
         #prms.append(' '.join(pinfiles))
         #prms.append('"' + '"  "'.join(pinfiles) + '"')
@@ -302,7 +354,12 @@ class mbtools():
         if(preencode==False):
             prms.append(" -c copy ")
         else:
-            prms.append(" -vn -ac 1 -ar 44100 -sample_fmt s16 ")
+            nch = 2
+            if (pmono):
+                nch = 1
+            prms.append(f" -vn -ac {nch} -ar {psr} -sample_fmt s16 ")
+            #prms.append(" -vn -ac 1 -ar 44100 -sample_fmt s16 ")
+
 
         prms.append(f''' "{poutput}" ''')
 
@@ -378,9 +435,9 @@ class mbtools():
         return fpath
 
 
-    def speak_clipboard_google(plang="en"):
+    def speak_clipboard_google(plang="en", from_primary_clipboard = False):
         #gtext = '"' + str(ptext).replace('"', " ") + '"'
-        gtext = mbwin.clipboard_get()
+        gtext = mbwin.clipboard_get(from_primary_clipboard)
         gtext = gtext.strip()
         if (len(gtext)>4000):
             gtext = gtext[0: 4000] + " (...)"
@@ -388,7 +445,7 @@ class mbtools():
         mbtools.google_speak_save(gtext)
         
 
-    def speak_clipboard_android(plang="en"):
+    def speak_clipboard_android(plang="en", from_primary_clipboard = False):
         #gtext = '"' + str(ptext).replace('"', " ") + '"'
         gtext = mbwin.clipboard_get()
         gtext = gtext.strip()
@@ -397,6 +454,58 @@ class mbtools():
         mbtools.speak_by_android_device(gtext)        
 
 
+    def download(purl, plocalpath, pheaders = None, pdata = None):
+        
+        if os.path.exists(plocalpath):
+            print("File is already exists:", plocalpath)
+            return os.stat(plocalpath).st_size
+
+        if (pheaders == None):
+            pheaders = {
+                'User-agent': 'Mozilla/4.0 (compatible; MRR API Python client; ' +
+                str(sys.platform) + '; ' + str(sys.version).replace('\n', '') + ')',
+                }
+
+        import requests, shutil
+
+        try:
+            with requests.get(purl, data=pdata, headers=pheaders, stream=True) as req:
+                with open(plocalpath, 'wb') as f:
+                    shutil.copyfileobj(req.raw, f)
+            #urllib.request.urlretrieve(purl, plocalpath)
+            #req = urllib.request.Request(url, myparams, header)
+            #req.headers = header
+        except Exception as ex:
+            print("ERROR downloading: ", purl, ex)
+            return 0
+
+        return os.stat(plocalpath).st_size
+
+
+
+    def grab_url(purl, pheaders = None, pdata = None):
+
+        if (pheaders == None):
+            pheaders = {
+                'User-agent': 'Mozilla/4.0 (compatible; MRR API Python client; ' +
+                str(sys.platform) + '; ' + str(sys.version).replace('\n', '') + ')',
+                }
+
+        import requests
+
+        try:
+            res = requests.post(purl, data=pdata, headers=pheaders)   
+            #res = requests.get(purl, headers=pheaders)
+            
+            return res.content
+            #return res.raw
+            #req = urllib.request.Request(url, myparams, header)
+            #req.headers = header
+        except Exception as ex:
+            print("ERROR downloading: ", purl, ex)
+            return ""
+
+        return ""
 
 
 #mymbwin = mbwin()
@@ -411,37 +520,43 @@ class mbtools():
 
 #mbwin.speak_clipboard_text()
 
-try:    
-    arg=None
-    if len(sys.argv)>1:
-        arg = sys.argv[1]
+if __name__ == '__main__':
 
-    if arg == "-wintitle":
-        wtitle = mbwin.get_active_win_title()
-        print(wtitle)
-        mbwin.speak(wtitle)  
+    try:    
+        arg=None
+        if len(sys.argv)>1:
+            arg = sys.argv[1]
 
-    elif arg == "-winprocess":
-        pname = mbwin.get_active_process_name()
-        print(pname)
-        mbwin.speak(pname)           
+        if arg == "-wintitle":
+            wtitle = mbwin.get_active_win_title()
+            print(wtitle)
+            mbwin.speak(wtitle)  
 
-    elif arg == "-speak_clipboard_android":
-        mbtools.speak_clipboard_android()
+        elif arg == "-winprocess":
+            pname = mbwin.get_active_process_name()
+            print(pname)
+            mbwin.speak(pname)            
 
-    elif arg == "-speak_clipboard_google":
-        mbtools.speak_clipboard_google()
+        elif arg == "-speak_clipboard_android":
+            mbtools.speak_clipboard_android()
 
-    elif arg == "-help": #mb
-        print("-wintitle".ljust(22, " "), "gets and speak active window title")       
-        print("-winprocess".ljust(22, " "), "gets and speak active window process")       
-        print("-speak_clipboard_android".ljust(22, " "), "speaks text copied to clipboard by android vbox.")       
-        print("-speak_clipboard_google".ljust(22, " "), "speaks text copied to clipboard by google service.")       
-        print("-help".ljust(22, " "),"show this message")
-    # else:
-    #     print("try -help to see command line parameters")
-       
-except Exception as ex:
-    print (ex)
+        elif arg == "-speak_clipboard_google":
+            mbtools.speak_clipboard_google()
+
+        elif arg == "-speak_clipboard_primary_google":
+            mbtools.speak_clipboard_google(from_primary_clipboard=True)
+
+        elif arg == "-help": #mb
+            print("-wintitle".ljust(22, " "), "gets and speak active window title")       
+            print("-winprocess".ljust(22, " "), "gets and speak active window process")       
+            print("-speak_clipboard_android".ljust(22, " "), "speaks text copied to clipboard by android vbox.")       
+            print("-speak_clipboard_google".ljust(22, " "), "speaks text copied to clipboard by google service.")       
+            print("-speak_clipboard_primary_google".ljust(22, " "), "speaks text in primary clipboard (selection) by google service.")       
+            print("-help".ljust(22, " "),"show this message")
+        # else:
+        #     print("try -help to see command line parameters")
+        
+    except Exception as ex:
+        print (ex)
 
 
