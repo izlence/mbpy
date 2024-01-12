@@ -2,9 +2,11 @@
 # sudo apt install espeak xdotool xclip xsel ffmpeg wmctrl zenity mpv
 # pip install pyperclip google_speech pyautogui
 
+from datetime import datetime
 import subprocess
 import sys
 import os
+import re
 
 
 class mbwin():
@@ -12,12 +14,14 @@ class mbwin():
     def __init__(self):
         pass
 
-    def speak(ptext):
+    def speak(ptext, pwait=True):
         gtext = '"' + str(ptext).replace('"', " ") + '"'
-        #res = subprocess.call(["espeak", gtext])
+        args = ["espeak", "-s", "144", "-v", "english-us", gtext]
         # defult speed is -s 175     
-        res = subprocess.call(["espeak", "-s", "144", "-v", "english-us", gtext])        
-        return res
+        # sp = subprocess.call(args)
+        sp = subprocess.Popen(args)
+        if pwait: sp.wait()
+        return sp
 
     def speak_by_google(ptext, plang="en"):
         #gtext = '"' + str(ptext).replace('"', " ") + '"'
@@ -55,10 +59,20 @@ class mbwin():
             content = myfile.readline()
         return content
 
+    # def get_win_by_name(prgxname="test.*mpv"):
+    #     byteOutput = subprocess.check_output(["xdotool", "search", "--limit", "1", "--name", str(prgxname)], timeout=2)
+    #     return byteOutput.decode('UTF-8').strip()
 
-    def get_win_by_name(prgxname="test.*mpv"):
-        byteOutput = subprocess.check_output(["xdotool", "search", "--limit", "1", "--name", prgxname], timeout=2)
-        return byteOutput.decode('UTF-8').strip()
+    def get_win_ids_by_name(prgxname="test.*mpv", plimit=1):
+        wids = []
+        try:
+            byteOutput = subprocess.check_output(["xdotool", "search", "--limit", str(plimit), "--name", str(prgxname)], timeout=2)
+            wids = byteOutput.decode('UTF-8').strip().splitlines()
+        except Exception:
+            wids = []
+        
+        return wids
+
 
     def send_key_to_win(pwid, *pkeys):
         args = ["xdotool", "key", "--clearmodifiers", "--delay", "44", "--window", pwid]
@@ -122,6 +136,7 @@ class mbwin():
         #works...
         #cmd="echo '" + ptext + "' | xclip -selection clipboard"
         ps = subprocess.Popen(pcmd, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+        return ps
 
 
     def config_get(pkey, pdefault=""):
@@ -176,8 +191,10 @@ class mbtools():
         from pymediainfo import MediaInfo
         media_info = MediaInfo.parse(purl)
         # Tracks can be accessed via the 'tracks' attribute or through shortcuts such as 'image_tracks', 'audio_tracks', 'video_tracks', etc.
-        general_track = media_info.general_tracks[0]            
-        return int(general_track.duration)
+        general_track = media_info.general_tracks[0]
+        if general_track.duration == None:
+            return -1
+        return int(float(general_track.duration))
         
         # # takes time... :(
         # #song = pydub.AudioSegment.from_ogg(purl)
@@ -215,7 +232,8 @@ class mbtools():
         cmd = ' '.join(prms)
         #cmd += " &"
         #print(cmd)
-        mbwin.run_bash_cmd(cmd)
+        # mbwin.run_bash_cmd(cmd)
+        os.system(cmd)
 
 
     def mpv_socket_play(pstart, pstop):
@@ -248,7 +266,7 @@ class mbtools():
 
         
     def ffmpeg_cut(pinput, poutput, pstart=0, pstop=0, *args ):
-        prms = ["ffmpeg", "-y", "-vn"]
+        prms = ["ffmpeg", "-y"] #"-vn"]
         if pstart>0:
             prms.append("-ss " + str(pstart))
 
@@ -426,6 +444,7 @@ class mbtools():
                 pydub.playback.play(au)
 
         else:
+            # $ google_speech -l tr merhabalar -e delay 0.5 overdrive 20 repeat 2 speed 0.9 gain -5
             from google_speech import Speech
             speech = Speech(ptext, plang)
             speech.save(fpath)
@@ -442,7 +461,7 @@ class mbtools():
         if (len(gtext)>4000):
             gtext = gtext[0: 4000] + " (...)"
 
-        mbtools.google_speak_save(gtext)
+        mbtools.google_speak_save(gtext, plang=plang)
         
 
     def speak_clipboard_android(plang="en", from_primary_clipboard = False):
@@ -451,7 +470,7 @@ class mbtools():
         gtext = gtext.strip()
         if (len(gtext)>50000):
             gtext = gtext[0: 50000] + " (...)"
-        mbtools.speak_by_android_device(gtext)        
+        mbtools.speak_by_android_device(gtext)
 
 
     def download(purl, plocalpath, pheaders = None, pdata = None):
@@ -506,8 +525,40 @@ class mbtools():
             return ""
 
         return ""
+    
+
+    def url_size(purl):
+        import requests 
+        res = requests.head(purl, allow_redirects=True)
+        return int(res.headers['Content-Length'])
+
+        # import urllib.request
+        # ret = urllib.request.urlopen(purl)
+        # meta = ret.info()
+        # return int(meta['Content-Length'])
+    
 
 
+    def time_to_ms(time):
+        """convert time format to milliseconds. Ex: 00:00:19.123 -> 19123"""
+
+        match = re.match('((\d+):)?((\d+):)?([0-9.]+)', time).groups()
+        hours = int(match[1]) if match[1] else 0
+        minutes = int(match[3]) if match[3] else 0
+        seconds = float(match[4]) if match[4] else 0
+
+        total_sec = hours * 3600 + minutes * 60 + seconds
+        return int(total_sec * 1000)
+        # hours, minutes, seconds_milliseconds = time.split(':')
+        # seconds, milliseconds = seconds_milliseconds.split('.')
+        # return int(hours) * 3600000 + int(minutes) * 60000 + int(seconds) * 1000 + int(milliseconds)
+
+
+    def get_formatted_datetime(pdt=datetime.now(), pformat="%Y-%m-%d %H:%M:%S"):
+        #datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return pdt.strftime(pformat)
+
+# print(mbtools.time_to_ms("00:00:19.123"))
 #mymbwin = mbwin()
 
 #mbwin.copy_to_clipboard("hello everyonsss sdf 322 3")
@@ -520,43 +571,38 @@ class mbtools():
 
 #mbwin.speak_clipboard_text()
 
+
+
 if __name__ == '__main__':
 
-    try:    
-        arg=None
-        if len(sys.argv)>1:
-            arg = sys.argv[1]
+    import argparse
 
-        if arg == "-wintitle":
-            wtitle = mbwin.get_active_win_title()
-            print(wtitle)
-            mbwin.speak(wtitle)  
+    argprs = argparse.ArgumentParser()        
+    argprs.add_argument('--wintitle', required=False, action="store_true", help="gets and speak active window title")
+    argprs.add_argument('--winprocess', required=False, action="store_true", help="gets and speak active window process")
+    argprs.add_argument('--speak_clipboard_android', required=False, action="store_true", help="speaks text copied to clipboard by android vbox.")
+    argprs.add_argument('--speak_clipboard_google', required=False, action="store_true", help="speaks text copied to clipboard by google service.")
+    argprs.add_argument('--speak_clipboard_primary_google', required=False, action="store_true", help="speaks text in primary clipboard (selection) by google service.")
+    argprs.add_argument('--lang', default="en", type=str, help="language code for text to speech")
 
-        elif arg == "-winprocess":
-            pname = mbwin.get_active_process_name()
-            print(pname)
-            mbwin.speak(pname)            
+    # args = argprs.parse_args() #don't allow undefined parameters
+    args, _ = argprs.parse_known_args() #ignore unknown arguments.
 
-        elif arg == "-speak_clipboard_android":
-            mbtools.speak_clipboard_android()
+    if args.wintitle:
+        wtitle = mbwin.get_active_win_title()
+        print(wtitle)
+        mbwin.speak(wtitle)  
+    
+    elif args.winprocess:
+        pname = mbwin.get_active_process_name()
+        print(pname)
+        mbwin.speak(pname)
 
-        elif arg == "-speak_clipboard_google":
-            mbtools.speak_clipboard_google()
+    elif args.speak_clipboard_android:
+            mbtools.speak_clipboard_android(plang=args.lang)
 
-        elif arg == "-speak_clipboard_primary_google":
-            mbtools.speak_clipboard_google(from_primary_clipboard=True)
+    elif args.speak_clipboard_google:
+        mbtools.speak_clipboard_google(plang=args.lang)
 
-        elif arg == "-help": #mb
-            print("-wintitle".ljust(22, " "), "gets and speak active window title")       
-            print("-winprocess".ljust(22, " "), "gets and speak active window process")       
-            print("-speak_clipboard_android".ljust(22, " "), "speaks text copied to clipboard by android vbox.")       
-            print("-speak_clipboard_google".ljust(22, " "), "speaks text copied to clipboard by google service.")       
-            print("-speak_clipboard_primary_google".ljust(22, " "), "speaks text in primary clipboard (selection) by google service.")       
-            print("-help".ljust(22, " "),"show this message")
-        # else:
-        #     print("try -help to see command line parameters")
-        
-    except Exception as ex:
-        print (ex)
-
-
+    elif args.speak_clipboard_primary_google:
+        mbtools.speak_clipboard_google(plang=args.lang, from_primary_clipboard=True)

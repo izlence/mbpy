@@ -35,6 +35,7 @@ class mbdb():
             cursor.close()
             if intr>0:
                 db.commit()
+            db.close()
             return intr
         except Exception as ex:
             print(ex)
@@ -49,6 +50,7 @@ class mbdb():
             cursor.execute(psql, pparams)
             rec = cursor.fetchone()
             cursor.close()
+            db.close()
             return rec
         except Exception as ex:
             print(ex)
